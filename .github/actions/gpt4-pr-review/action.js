@@ -104,7 +104,7 @@ function generateDiff(prFiles) {
 function generateReviewPrompt(prDescription, diff) {
   return `
 You are an expert code reviewer. Please review the following pull request and provide line-by-line suggestions for improvements.
-Focus on code quality, best practices, potential bugs, and performance issues.
+Focus on code quality, best practices, potential bugs, and performance issues. Do not output more than 6 suggestions for the entire diff, so focus on what's most important.
 
 <Description>
 ${prDescription}
@@ -131,7 +131,7 @@ function generateLintPrompt(prDescription, diff) {
 `.trim();
   return `
 You are an expert code reviewer. Please review the following pull request and provide line-by-line suggestions for improvements.
-Focus on the given list of guidelines and provide suggestions for each violation. Do not provide suggestions for issues outside the scope of these guidelines.
+Focus on the given list of guidelines and provide suggestions for each violation. Do not output more than 6 suggestions for the entire diff, so focus on what's most important. Do not provide suggestions for issues outside the scope of these guidelines.
 <Description>
 ${prDescription}
 </Description>
@@ -183,7 +183,7 @@ async function getReview(prompt, openaiClient) {
   const instructor = new Instructor({ client: openaiClient, mode: "TOOLS" });
   return instructor.chat.completions.create({
     messages: [{ role: "user", content: prompt }],
-    model: "gpt-4",
+    model: "gpt-4o",
     response_model: {
       schema: ReviewSchema,
       name: "Review",
