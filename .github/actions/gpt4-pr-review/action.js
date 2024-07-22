@@ -35,17 +35,49 @@ const ReviewSchema = z.object({
     .describe("An array of line-by-line suggestion objects"),
 });
 
-// Helper functions
-function addLineNumbersToDiff(patch) {
+export function addLineNumbersToDiff(patch) {
   let lineNumber = 0;
+  let isNewFile = false;
+  const diffLineRegex =
+    /^([+ -]|\\ No newline|Binary files|diff --git|index|---|\+\+\+|@@|rename|copy|mode)/;
+  const nonNumberedPrefixes = [
+    "-",
+    "\\",
+    "B",
+    "d",
+    "i",
+    "-",
+    "+",
+    "@",
+    "r",
+    "c",
+    "m",
+  ];
+
   return patch
     .split("\n")
     .map((line) => {
-      if (line.startsWith("+") || line.startsWith(" ")) {
-        lineNumber++;
-        return `${lineNumber.toString().padStart(5, " ")} ${line}`;
-      } else if (line.startsWith("-")) {
-        return `     ${line}`;
+      const match = line.match(diffLineRegex);
+      if (match) {
+        const prefix = match[1];
+
+        // Reset line number for new files
+        if (prefix === "diff" || prefix === "+++" || prefix === "---") {
+          lineNumber = 0;
+          isNewFile = true;
+        } else if (prefix === "@@") {
+          // Extract starting line number from hunk header
+          const hunkMatch = line.match(/@@ -\d+,\d+ \+(\d+)/);
+          if (hunkMatch) {
+            lineNumber = parseInt(hunkMatch[1]) - 1;
+          }
+          isNewFile = false;
+        } else if (!isNewFile && (prefix === "+" || prefix === " ")) {
+          lineNumber++;
+          return `${lineNumber.toString().padStart(5, " ")} ${line}`;
+        } else if (nonNumberedPrefixes.includes(prefix)) {
+          return `     ${line}`;
+        }
       }
       return line;
     })
