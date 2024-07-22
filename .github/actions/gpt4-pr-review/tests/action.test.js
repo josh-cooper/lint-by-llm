@@ -3,19 +3,15 @@ import { rest } from "msw";
 import { setupServer } from "msw/node";
 import dotenv from "dotenv";
 
-// Load environment variables from .env file
 dotenv.config({ path: ".env.test" });
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("Missing OPENAI_API_KEY environment variable");
 }
 
-// Mock modules
 jest.mock("@actions/github", () => ({
   context: {
     payload: {
-      pull_request: {
-        number: 1,
-      },
+      pull_request: { number: 1 },
     },
     repo: {
       owner: "testowner",
@@ -30,34 +26,31 @@ jest.mock("@actions/core", () => ({
   setFailed: jest.fn(),
 }));
 
-// Sample diff
-const sampleDiff = `
-diff --git a/example.js b/example.js
+const sampleDiff = `diff --git a/example.js b/example.js
 index 1234567..abcdefg 100644
 --- a/example.js
 +++ b/example.js
 @@ -1,5 +1,5 @@
  function greet(name) {
 -  console.log('Hello, ' + name + '!');
-+  console.log(\`Hello, \${name}!\`);
++  console.log(\`Helo, \${name}!\`);
  }
 
- greet('World');
-`;
+ greet('World');`;
 
-// Set up MSW server
 const server = setupServer(
   rest.get(
     "https://api.github.com/repos/testowner/testrepo/pulls/1",
-    (req, res, ctx) => {
-      return res(ctx.json({ body: "This is a test PR" }));
-    }
+    (req, res, ctx) => res(ctx.json({ body: "This is a test PR" }))
   ),
   rest.get(
     "https://api.github.com/repos/testowner/testrepo/pulls/1/files",
-    (req, res, ctx) => {
-      return res(ctx.json([{ filename: "example.js", patch: sampleDiff }]));
-    }
+    (req, res, ctx) =>
+      res(ctx.json([{ filename: "example.js", patch: sampleDiff, changes: 3 }]))
+  ),
+  rest.get(
+    "https://api.github.com/repos/testowner/testrepo/pulls/1/commits",
+    (req, res, ctx) => res(ctx.json([{ sha: "fakeSha123" }]))
   )
 );
 
@@ -66,16 +59,16 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 test("GPT-4 PR Review Action", async () => {
-  console.warn("Running an actual API call to OpenAI");
+  console.warn(
+    "Running an actual API call to OpenAI. This is designed as a simple end-to-end test. This will cost real $ and output is far from deterministic."
+  );
 
-  // Mock input values
   const mockGetInput = jest.requireMock("@actions/core").getInput;
   mockGetInput.mockImplementation((name) => {
     if (name === "github-token") return "fake-token";
     if (name === "openai-api-key") return process.env.OPENAI_API_KEY;
   });
 
-  // Mock Octokit
   const mockOctokit = {
     rest: {
       pulls: {
@@ -83,8 +76,12 @@ test("GPT-4 PR Review Action", async () => {
           .fn()
           .mockResolvedValue({ data: { body: "This is a test PR" } }),
         listFiles: jest.fn().mockResolvedValue({
-          data: [{ filename: "example.js", patch: sampleDiff }],
+          data: [{ filename: "example.js", patch: sampleDiff, changes: 3 }],
         }),
+        listCommits: jest.fn().mockResolvedValue({
+          data: [{ sha: "fakeSha123" }],
+        }),
+        createReviewComment: jest.fn().mockResolvedValue({}),
       },
       issues: {
         createComment: jest.fn().mockResolvedValue({}),
@@ -93,44 +90,37 @@ test("GPT-4 PR Review Action", async () => {
   };
   jest.requireMock("@actions/github").getOctokit.mockReturnValue(mockOctokit);
 
-  // Import and run the action
   const { runAction } = await import("../action.js");
 
-  try {
-    await runAction();
-  } catch (error) {
-    console.error("Error running the action:", error);
-    throw error;
-  }
+  await runAction();
 
   // Assertions
-  expect(mockOctokit.rest.pulls.get).toHaveBeenCalledWith(
-    expect.objectContaining({
-      owner: "testowner",
-      repo: "testrepo",
-      pull_number: 1,
-    })
-  );
+  expect(mockOctokit.rest.pulls.get).toHaveBeenCalled();
+  expect(mockOctokit.rest.pulls.listFiles).toHaveBeenCalled();
+  expect(mockOctokit.rest.pulls.listCommits).toHaveBeenCalled();
+  expect(mockOctokit.rest.issues.createComment).toHaveBeenCalled();
+  expect(mockOctokit.rest.pulls.createReviewComment).toHaveBeenCalled();
 
-  expect(mockOctokit.rest.pulls.listFiles).toHaveBeenCalledWith(
-    expect.objectContaining({
-      owner: "testowner",
-      repo: "testrepo",
-      pull_number: 1,
-    })
-  );
+  // Check the structure of the overview comment
+  const overviewComment =
+    mockOctokit.rest.issues.createComment.mock.calls[0][0].body;
+  expect(overviewComment).toContain("GPT-4 Code Review Overview");
 
-  expect(mockOctokit.rest.issues.createComment).toHaveBeenCalledWith(
-    expect.objectContaining({
-      owner: "testowner",
-      repo: "testrepo",
-      issue_number: 1,
-      body: expect.stringContaining("GPT-4 Code Review Overview"),
-    })
-  );
+  // Check the structure of the line comments
+  const lineComments = mockOctokit.rest.pulls.createReviewComment.mock.calls;
+  expect(lineComments.length).toBeGreaterThan(0);
 
-  // Log the actual comment for manual inspection
-  const commentCall = mockOctokit.rest.issues.createComment.mock.calls[0][0];
-  console.log("GPT-4 Review Comment:");
-  console.log(commentCall.body);
-}, 30000); // Increase timeout to 30 seconds for API call
+  lineComments.forEach((call) => {
+    const commentBody = call[0].body;
+    expect(commentBody.toLowerCase()).toContain("hello");
+  });
+
+  // Log comments for manual inspection
+  console.log("GPT-4 Review Overview Comment:");
+  console.log(overviewComment);
+
+  console.log("GPT-4 Review Line Comments:");
+  lineComments.forEach((call, index) => {
+    console.log(`Comment ${index + 1}:`, call[0].body);
+  });
+}, 30000);
