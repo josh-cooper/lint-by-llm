@@ -71,18 +71,51 @@ function generateDiff(prFiles) {
 
 function generateReviewPrompt(prDescription, diff) {
   return `
-    You are an expert code reviewer. Please review the following pull request and provide line-by-line suggestions for improvements.
-    Focus on code quality, best practices, potential bugs, and performance issues.
+You are an expert code reviewer. Please review the following pull request and provide line-by-line suggestions for improvements.
+Focus on code quality, best practices, potential bugs, and performance issues.
 
-    PR Description:
-    ${prDescription}
+<Description>
+${prDescription}
+</Description>
 
-    Diff (with line numbers):
-    ${diff}
+<Diff>
+Diff (with line numbers):
+${diff}
+</Diff>
 
-    Please provide your review as a concise overview of your review, and an array of suggestion objects with the given schema.
-    Make sure to include the file path for each suggestion and use the correct line numbers as shown in the diff.
-  `;
+Please provide your review as a concise overview of your review, and an array of suggestion objects with the given schema.
+Make sure to include the file path for each suggestion and use the correct line numbers as shown in the diff.
+  `.trim();
+}
+
+function generateLintPrompt(prDescription, diff) {
+  const guidelines = `
+- Use consistent indentation
+- Use camel case for variables, functions, and classes
+- Avoid magic numbers and hardcoded values
+- Include proper error handling and logging
+- Keep functions small and focused, without excessive nesting or obscuring the main behavior
+- Ensure code is secure and free from common vulnerabilities
+`.trim();
+  return `
+You are an expert code reviewer. Please review the following pull request and provide line-by-line suggestions for improvements.
+Focus on the given list of guidelines and provide suggestions for each violation. Do not provide suggestions for issues outside the scope of these guidelines.
+<Description>
+${prDescription}
+</Description>
+
+<Diff>
+Diff (with line numbers):
+${diff}
+</Diff>
+
+<Guidelines>
+${guidelines}
+</Guidelines>
+
+Please provide your review as a concise overview of adherence to the guidelines, and an array of suggestion objects with the given schema.
+Make sure to include the file path for each suggestion and use the correct line numbers as shown in the diff.
+`.trim();
 }
 
 async function postReview(octokit, repo, prNumber, review, latestCommitSha) {
@@ -146,8 +179,17 @@ export async function runAction() {
     const diff = generateDiff(prFiles);
 
     const reviewPrompt = generateReviewPrompt(prData.data.body, diff);
+    const lintPrompt = generateLintPrompt(prData.data.body, diff);
 
-    const review = await getReview(reviewPrompt, openai);
+    const reviews = await Promise.all([
+      getReview(reviewPrompt, openai),
+      getReview(lintPrompt, openai),
+    ]);
+
+    const review = {
+      overview: `## Overview\n\n` + reviews.map((r) => r.overview).join("\n\n"),
+      suggestions: reviews.flatMap((r) => r.suggestions),
+    };
 
     const latestCommitSha = await getLatestCommitSha(octokit, repo, prNumber);
 

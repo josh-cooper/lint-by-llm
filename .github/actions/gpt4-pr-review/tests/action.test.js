@@ -31,12 +31,12 @@ index 1234567..abcdefg 100644
 --- a/example.js
 +++ b/example.js
 @@ -1,5 +1,5 @@
- function greet(name) {
+ function print_greeting(name) {
 -  console.log('Hello, ' + name + '!');
 +  console.log(\`Helo, \${name}!\`);
  }
 
- greet('World');`;
+ print_greeting('World');`;
 
 const server = setupServer(
   rest.get(
@@ -110,10 +110,9 @@ test("GPT-4 PR Review Action", async () => {
   const lineComments = mockOctokit.rest.pulls.createReviewComment.mock.calls;
   expect(lineComments.length).toBeGreaterThan(0);
 
-  lineComments.forEach((call) => {
-    const commentBody = call[0].body;
-    expect(commentBody.toLowerCase()).toContain("hello");
-  });
+  expect(
+    lineComments.some((call) => call[0].body.toLowerCase().includes("hello"))
+  ).toBe(true);
 
   // Log comments for manual inspection
   console.log("GPT-4 Review Overview Comment:");
